@@ -82,7 +82,7 @@ app.post('/mark-late', async (req, res) => {
       // Parallel pagination - search 10 pages at a time for speed
       const PAGES_PER_BATCH = 10;
       const ITEMS_PER_PAGE = 100;
-      const MAX_BATCHES = 5;
+      const MAX_BATCHES = 20;  // Search up to 20,000 clients
 
       for (let batch = 0; batch < MAX_BATCHES && !clientId; batch++) {
         const startPage = batch * PAGES_PER_BATCH + 1;
@@ -91,7 +91,7 @@ app.post('/mark-late', async (req, res) => {
         for (let i = 0; i < PAGES_PER_BATCH; i++) {
           const page = startPage + i;
           pagePromises.push(
-            callMeevoAPI(`/clients?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&PageNumber=${page}&ItemsPerPage=${ITEMS_PER_PAGE}`)
+            callMeevoAPI(`/clients?tenantid=${CONFIG.TENANT_ID}&locationid=${locationId}&PageNumber=${page}&ItemsPerPage=${ITEMS_PER_PAGE}`)
               .catch(() => ({ data: [] }))
           );
         }
