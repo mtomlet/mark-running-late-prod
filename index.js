@@ -166,70 +166,47 @@ app.post('/mark-late', async (req, res) => {
       });
     }
 
-    // Get appointment details to get appointmentId and concurrencyCheckDigits
-    const appointmentId = appointmentDetails?.appointmentId;
-    if (!appointmentId) {
-      return res.json({
-        success: false,
-        error: 'Could not find appointment ID'
-      });
+    // Get appointment details if not already fetched
+    if (!appointmentDetails) {
+      console.log('PRODUCTION: Getting appointment details...');
+      const detailsResult = await callMeevoAPI(
+        `/book/service/runninglate?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&AppointmentServiceId=${aptServiceId}`
+      );
+
+      if (!detailsResult?.data) {
+        return res.json({
+          success: false,
+          error: 'Could not get appointment details'
+        });
+      }
+
+      appointmentDetails = detailsResult.data;
     }
 
-    console.log('PRODUCTION: Getting appointment details for note update...');
-    const aptResult = await callMeevoAPI(
-      `/book/appointment/${appointmentId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}`
-    );
-
-    if (!aptResult?.data) {
-      return res.json({
-        success: false,
-        error: 'Could not get appointment details'
-      });
-    }
-
-    const aptData = aptResult.data;
-
-    // Add "Running Late" note to the appointment
-    // This note will be shown to the barber at check-in
-    console.log('PRODUCTION: Adding running late note to appointment...');
-
-    const noteTime = new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'America/Phoenix'
-    });
-
-    const lateMessage = estimated_minutes
-      ? `🚗 CLIENT RUNNING LATE (~${estimated_minutes} min) - Notified via AI at ${noteTime}`
-      : `🚗 CLIENT RUNNING LATE - Notified via AI Phone Agent at ${noteTime}`;
+    // PUT to mark as running late
+    console.log('PRODUCTION: Marking appointment as running late...');
 
     const updateBody = {
-      AppointmentId: appointmentId,
-      ConcurrencyCheckDigits: aptData.concurrencyCheckDigits,
-      BookingClientId: aptData.bookingClientId,
-      TenantId: parseInt(CONFIG.TENANT_ID),
-      LocationId: parseInt(locationId),
-      AppointmentNote: {
-        Body: lateMessage,
-        ShowAtCheckIn: true,
-        ShowAtCheckOut: false
-      }
+      ServiceId: appointmentDetails.serviceId,
+      ClientId: appointmentDetails.clientId,
+      EmployeeId: appointmentDetails.employeeId,
+      ConcurrencyCheckDigits: appointmentDetails.concurrencyCheckDigits,
+      StartTime: appointmentDetails.startTime,
+      IsRunningLate: true
     };
 
     const result = await callMeevoAPI(
-      `/book/appointment/${appointmentId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}`,
+      `/book/service/runninglate?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&AppointmentServiceId=${aptServiceId}`,
       'PUT',
       updateBody
     );
 
-    console.log('PRODUCTION: Successfully added running late note!');
+    console.log('PRODUCTION: Successfully marked appointment as running late!');
     return res.json({
       success: true,
       marked_late: true,
-      appointment_id: appointmentId,
       appointment_service_id: aptServiceId,
       appointment_time: appointmentDetails.startTime,
-      note_added: lateMessage,
       message: "Your barber has been notified that you're running late."
     });
 
