@@ -166,22 +166,21 @@ app.post('/mark-late', async (req, res) => {
       });
     }
 
-    // Get appointment details if not already fetched
-    if (!appointmentDetails) {
-      console.log('PRODUCTION: Getting appointment details...');
-      const detailsResult = await callMeevoAPI(
-        `/book/service/runninglate?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&AppointmentServiceId=${aptServiceId}`
-      );
+    // ALWAYS get fresh appointment details from runninglate endpoint
+    // This ensures we have the latest concurrencyCheckDigits
+    console.log('PRODUCTION: Getting fresh appointment details...');
+    const detailsResult = await callMeevoAPI(
+      `/book/service/runninglate?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&AppointmentServiceId=${aptServiceId}`
+    );
 
-      if (!detailsResult?.data) {
-        return res.json({
-          success: false,
-          error: 'Could not get appointment details'
-        });
-      }
-
-      appointmentDetails = detailsResult.data;
+    if (!detailsResult?.data) {
+      return res.json({
+        success: false,
+        error: 'Could not get appointment details'
+      });
     }
+
+    appointmentDetails = detailsResult.data;
 
     // PUT to mark as running late
     console.log('PRODUCTION: Marking appointment as running late...');
