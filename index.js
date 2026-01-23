@@ -71,57 +71,32 @@ app.post('/mark-late', async (req, res) => {
     let aptServiceId = appointment_service_id;
     let appointmentDetails = null;
 
-    // If no direct appointment_service_id, lookup by phone/email with pagination
+    // If no direct appointment_service_id, lookup by phone/email using /clients/lookup
     if (!aptServiceId && (client_phone || client_email)) {
-      console.log('PRODUCTION: Looking up appointment by phone/email...');
+      console.log('PRODUCTION: Looking up client by phone/email...');
 
-      const normalizedPhone = client_phone?.replace(/\D/g, '').slice(-10);
+      const normalizedPhone = client_phone?.replace(/\D/g, '');
       const normalizedEmail = client_email?.toLowerCase();
       let clientId = null;
 
-      // Parallel pagination - search 10 pages at a time for speed
-      const PAGES_PER_BATCH = 10;
-      const ITEMS_PER_PAGE = 100;
-      const MAX_BATCHES = 20;  // Search up to 20,000 clients
+      // Use /clients/lookup endpoint for direct phone/email search
+      const lookupBody = {};
+      if (normalizedPhone) {
+        lookupBody.PhoneNumbers = [normalizedPhone];
+      } else if (normalizedEmail) {
+        lookupBody.EmailIds = [normalizedEmail];
+      }
 
-      for (let batch = 0; batch < MAX_BATCHES && !clientId; batch++) {
-        const startPage = batch * PAGES_PER_BATCH + 1;
-        const pagePromises = [];
+      const lookupResult = await callMeevoAPI(
+        `/clients/lookup?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}`,
+        'POST',
+        lookupBody
+      );
 
-        for (let i = 0; i < PAGES_PER_BATCH; i++) {
-          const page = startPage + i;
-          pagePromises.push(
-            callMeevoAPI(`/clients?tenantid=${CONFIG.TENANT_ID}&locationid=${locationId}&PageNumber=${page}&ItemsPerPage=${ITEMS_PER_PAGE}`)
-              .catch(() => ({ data: [] }))
-          );
-        }
-
-        const results = await Promise.all(pagePromises);
-        let emptyPages = 0;
-
-        for (const result of results) {
-          const clients = result?.data || [];
-          if (clients.length === 0) emptyPages++;
-
-          for (const c of clients) {
-            if (normalizedPhone) {
-              const cPhone = (c.primaryPhoneNumber || '').replace(/\D/g, '').slice(-10);
-              if (cPhone === normalizedPhone) {
-                clientId = c.clientId;
-                console.log('PRODUCTION: Found client by phone:', c.firstName, c.lastName);
-                break;
-              }
-            }
-            if (normalizedEmail && c.emailAddress?.toLowerCase() === normalizedEmail) {
-              clientId = c.clientId;
-              console.log('PRODUCTION: Found client by email:', c.firstName, c.lastName);
-              break;
-            }
-          }
-          if (clientId) break;
-        }
-
-        if (emptyPages === PAGES_PER_BATCH) break;
+      const clients = lookupResult?.data || [];
+      if (clients.length > 0) {
+        clientId = clients[0].clientId;
+        console.log('PRODUCTION: Found client:', clients[0].firstName, clients[0].lastName);
       }
 
       if (!clientId) {
