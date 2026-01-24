@@ -75,7 +75,8 @@ app.post('/mark-late', async (req, res) => {
     if (!aptServiceId && (client_phone || client_email)) {
       console.log('PRODUCTION: Looking up client by phone/email...');
 
-      const normalizedPhone = client_phone?.replace(/\D/g, '');
+      // Strip to 10 digits - Meevo API requires 10-digit format (no country code)
+      const normalizedPhone = client_phone?.replace(/\D/g, '').slice(-10);
       const normalizedEmail = client_email?.toLowerCase();
       let clientId = null;
 
