@@ -6,6 +6,10 @@
  *
  * PRODUCTION CREDENTIALS - DO NOT USE FOR TESTING
  * Location: Keep It Cut - Phoenix Encanto (201664)
+ *
+ * Version: 2.0.0 - FIX: Use AppointmentNote instead of broken runninglate endpoint
+ * The /book/service/runninglate PUT endpoint silently ignores IsRunningLate field.
+ * Solution: Add AppointmentNote with ShowAtCheckIn:true to notify barber.
  */
 
 const express = require('express');
@@ -142,9 +146,8 @@ app.post('/mark-late', async (req, res) => {
       });
     }
 
-    // ALWAYS get fresh appointment details from runninglate endpoint
-    // This ensures we have the latest concurrencyCheckDigits
-    console.log('PRODUCTION: Getting fresh appointment details...');
+    // Get appointment details to get appointmentId
+    console.log('PRODUCTION: Getting appointment details...');
     const detailsResult = await callMeevoAPI(
       `/book/service/runninglate?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&AppointmentServiceId=${aptServiceId}`
     );
@@ -157,31 +160,72 @@ app.post('/mark-late', async (req, res) => {
     }
 
     appointmentDetails = detailsResult.data;
+    const appointmentId = appointmentDetails.appointmentId;
 
-    // PUT to mark as running late
-    console.log('PRODUCTION: Marking appointment as running late...');
+    if (!appointmentId) {
+      return res.json({
+        success: false,
+        error: 'Could not find appointment ID'
+      });
+    }
+
+    // Get full appointment details for concurrencyCheckDigits
+    console.log('PRODUCTION: Getting full appointment for note update...');
+    const aptResult = await callMeevoAPI(
+      `/book/appointment/${appointmentId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}`
+    );
+
+    if (!aptResult?.data) {
+      return res.json({
+        success: false,
+        error: 'Could not get appointment details'
+      });
+    }
+
+    const aptData = aptResult.data;
+
+    // Add "Running Late" note to the appointment
+    // NOTE: The /book/service/runninglate PUT endpoint silently ignores IsRunningLate field
+    // Solution: Use AppointmentNote with ShowAtCheckIn:true to notify barber at check-in
+    console.log('PRODUCTION: Adding running late note to appointment...');
+
+    const noteTime = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Phoenix'
+    });
+
+    const lateMessage = estimated_minutes
+      ? `CLIENT RUNNING LATE (~${estimated_minutes} min) - Notified via AI at ${noteTime}`
+      : `CLIENT RUNNING LATE - Notified via AI Phone Agent at ${noteTime}`;
 
     const updateBody = {
-      ServiceId: appointmentDetails.serviceId,
-      ClientId: appointmentDetails.clientId,
-      EmployeeId: appointmentDetails.employeeId,
-      ConcurrencyCheckDigits: appointmentDetails.concurrencyCheckDigits,
-      StartTime: appointmentDetails.startTime,
-      IsRunningLate: true
+      AppointmentId: appointmentId,
+      ConcurrencyCheckDigits: aptData.concurrencyCheckDigits,
+      BookingClientId: aptData.bookingClientId,
+      TenantId: parseInt(CONFIG.TENANT_ID),
+      LocationId: parseInt(locationId),
+      AppointmentNote: {
+        Body: lateMessage,
+        ShowAtCheckIn: true,
+        ShowAtCheckOut: false
+      }
     };
 
     const result = await callMeevoAPI(
-      `/book/service/runninglate?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}&AppointmentServiceId=${aptServiceId}`,
+      `/book/appointment/${appointmentId}?TenantId=${CONFIG.TENANT_ID}&LocationId=${locationId}`,
       'PUT',
       updateBody
     );
 
-    console.log('PRODUCTION: Successfully marked appointment as running late!');
+    console.log('PRODUCTION: Successfully added running late note!');
     return res.json({
       success: true,
       marked_late: true,
+      appointment_id: appointmentId,
       appointment_service_id: aptServiceId,
       appointment_time: appointmentDetails.startTime,
+      note_added: lateMessage,
       message: "Your barber has been notified that you're running late."
     });
 
@@ -199,7 +243,9 @@ app.get('/health', (req, res) => {
     status: 'ok',
     environment: 'PRODUCTION',
     location: 'Phoenix Encanto',
-    service: 'mark-running-late'
+    service: 'mark-running-late',
+    version: '2.0.0',
+    fix: 'Uses AppointmentNote instead of broken runninglate endpoint'
   });
 });
 
